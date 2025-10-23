@@ -42,9 +42,9 @@
 
 // Platform capabilities
 #define PLATFORM_HAS_FILESYSTEM 1
-#define PLATFORM_HAS_NETWORKING 0
+#define PLATFORM_HAS_NETWORKING 1
 #define PLATFORM_HAS_THREADING 0
-#define PLATFORM_HAS_SOCKETS 0
+#define PLATFORM_HAS_SOCKETS 1
 
 // Platform-specific types
 typedef __wasi_fd_t avm_file_t;

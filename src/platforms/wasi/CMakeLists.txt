@@ -31,6 +31,8 @@ set(WASI_PLATFORM_SOURCES
     src/lib/time_wasi.c
     src/lib/memory_wasi.c
     src/lib/random_wasi.c
+    src/lib/wasi_net.h
+    src/lib/wasi_net.c
 )
 
 # Find mbedtls
@@ -56,6 +58,7 @@ target_compile_definitions(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC
     AVM_NO_SMP
     AVM_NO_JIT
     __wasi__
+    __wasilibc_use_wasip2
 )
 
 target_link_libraries(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC
