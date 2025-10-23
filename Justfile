@@ -42,7 +42,20 @@ wasi-clean:
     @echo "✓ WASI build cleaned"
 
 # Rebuild WASI from scratch
-wasi-rebuild: wasi-clean wasi-build
+wasi-rebuild: wasi-clean build-packbeam wasi-build
+
+# Build PackBEAM natively (needed for WASI cross-compilation)
+build-packbeam:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔧 Building PackBEAM natively..."
+    mkdir -p build-native
+    cd build-native
+    cmake .. -DCMAKE_BUILD_TYPE=Release \
+        -DZLIB_INCLUDE_DIR=/usr/include \
+        -DZLIB_LIBRARY_RELEASE=/usr/lib/x86_64-linux-gnu/libz.so
+    make -j$(nproc) PackBEAM
+    echo "✓ PackBEAM built at build-native/tools/packbeam/PackBEAM"
 
 # Setup: Install WASI SDK and all dependencies
 setup: install-wasi-sdk
@@ -94,7 +107,7 @@ create-toolchain: verify-wasi
     @echo "✓ Toolchain file created at cmake/wasi-toolchain.cmake"
 
 # Configure CMake for WASI build
-configure: create-toolchain
+configure: create-toolchain build-packbeam
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -109,6 +122,10 @@ configure: create-toolchain
         -DAVM_DISABLE_SMP=ON \
         -DAVM_DISABLE_TASK_DRIVER=ON \
         -DAVM_DISABLE_NETWORKING=ON
+
+    # Symlink native PackBEAM so it's available for packing libraries
+    mkdir -p tools/packbeam
+    ln -sf $(pwd)/../build-native/tools/packbeam/PackBEAM tools/packbeam/PackBEAM
 
     echo "✓ Configuration complete!"
 
@@ -312,7 +329,7 @@ wasi-test:
     mkdir -p tests/wasi
     cd tests/wasi
     erlc simple_test.erl display_test.erl math_test.erl atom_test.erl list_test.erl \
-         test_zlib_compress.erl spawn_fun1.erl test_ets.erl
+         test_zlib_compress.erl spawn_fun1.erl test_ets.erl calculator.erl
 
     # Run tests
     echo ""
@@ -321,15 +338,17 @@ wasi-test:
 
     # Run all integration tests (zlib support enabled)
     # Note: code_lock excluded (requires gen_statem from OTP libs)
-    TESTS=(simple_test display_test math_test atom_test list_test test_zlib_compress spawn_fun1 test_ets)
+    TESTS=(simple_test display_test math_test atom_test list_test test_zlib_compress spawn_fun1 test_ets calculator)
     PASSED=0
     FAILED=0
 
     for test in "${TESTS[@]}"; do
         echo ""
         echo "▶ Running $test..."
+        set +e  # Temporarily allow commands to fail
         OUTPUT=$($WASMTIME run --dir=. ../../{{BUILD_DIR}}/src/platforms/wasi/AtomVM.wasm $test.beam 2>&1)
         EXIT_CODE=$?
+        set -e  # Re-enable exit on error
         # Accept tests that return ok or integer values (0, 42, etc.)
         # Ignore exit code if return value is correct (some tests trigger init.beam warnings)
         if echo "$OUTPUT" | grep -qE "Return value: (ok|[0-9]+)"; then

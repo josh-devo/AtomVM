@@ -34,6 +34,7 @@ endif()
 find_package(ZLIB)
 if (ZLIB_FOUND)
     target_compile_definitions(PackBEAM PUBLIC WITH_ZLIB)
+    target_include_directories(PackBEAM PRIVATE ${ZLIB_INCLUDE_DIRS})
     target_link_libraries(PackBEAM PRIVATE ${ZLIB_LIBRARIES})
 endif (ZLIB_FOUND)
 

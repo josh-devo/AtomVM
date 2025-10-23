@@ -263,6 +263,7 @@ if ((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") OR
     find_package(ZLIB)
     if (ZLIB_FOUND)
         target_compile_definitions(libAtomVM PRIVATE WITH_ZLIB)
+        target_include_directories(libAtomVM PRIVATE ${ZLIB_INCLUDE_DIRS})
         target_link_libraries(libAtomVM PUBLIC ${ZLIB_LIBRARIES})
     endif(ZLIB_FOUND)
 endif()

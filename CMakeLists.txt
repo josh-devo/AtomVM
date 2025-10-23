@@ -89,6 +89,8 @@ if(NOT AVM_BUILD_RUNTIME_ONLY AND NOT CMAKE_SYSTEM_NAME STREQUAL "WASI")
     add_subdirectory(tests)
 endif()
 
+# PackBEAM is a host tool - skip building it when cross-compiling to WASI
+# (it should already be available from a native build)
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "WASI")
     add_subdirectory(tools/packbeam)
     add_subdirectory(tools/uf2tool)
