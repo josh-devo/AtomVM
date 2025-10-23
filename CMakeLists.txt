@@ -66,7 +66,16 @@ endif()
 
 set(AVM_PRECOMPILED_TARGETS "x86_64;aarch64;armv6m;armv6m+float32" CACHE STRING "Targets to precompile code to if AVM_DISABLE_JIT is OFF or AVM_ENABLE_PRECOMPILED is ON")
 
-if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") OR
+message(STATUS "Detected CMAKE_SYSTEM_NAME: ${CMAKE_SYSTEM_NAME}")
+
+if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
+    message(STATUS "Building for WASI platform")
+    # WASI platform has specific limitations
+    set(AVM_DISABLE_SMP ON CACHE BOOL "WASI requires SMP disabled" FORCE)
+    set(AVM_DISABLE_TASK_DRIVER ON CACHE BOOL "WASI requires task driver disabled" FORCE)
+    set(AVM_DISABLE_JIT ON CACHE BOOL "WASI does not support JIT" FORCE)
+    add_subdirectory(src/platforms/wasi)
+elseif((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") OR
    (${CMAKE_SYSTEM_NAME} STREQUAL "Linux") OR
    (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD") OR
    (${CMAKE_SYSTEM_NAME} STREQUAL "DragonFly"))
@@ -75,12 +84,14 @@ else()
     message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}")
 endif()
 
-if(NOT AVM_BUILD_RUNTIME_ONLY)
+if(NOT AVM_BUILD_RUNTIME_ONLY AND NOT CMAKE_SYSTEM_NAME STREQUAL "WASI")
     add_subdirectory(tests)
 endif()
 
-add_subdirectory(tools/packbeam)
-add_subdirectory(tools/uf2tool)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "WASI")
+    add_subdirectory(tools/packbeam)
+    add_subdirectory(tools/uf2tool)
+endif()
 
 if (NOT "${CMAKE_GENERATOR}" MATCHES "Xcode")
     add_custom_target(dialyzer COMMENT "Run dialyzer")

@@ -30,3 +30,5 @@ src/platforms/esp32/sdkconfig
 .DS_Store
 .cache
 .clang-tidy
+
+build-wasi/**
