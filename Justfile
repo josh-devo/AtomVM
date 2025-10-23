@@ -10,6 +10,40 @@ BUILD_DIR := "build-wasi"
 default:
     @just --list
 
+# Quick command: configure, build, and show status
+wasi: wasi-build wasi-info
+
+# Build WASI (same as build but more explicit)
+wasi-build: configure
+    @echo "🔨 Building AtomVM for WASI..."
+    cd {{BUILD_DIR}} && make -j16 AtomVM.wasm
+    @echo "✓ WASI build complete!"
+
+# Show WASI build info
+wasi-info:
+    @echo "📊 AtomVM WASI Build Status"
+    @echo "============================"
+    @if [ -f "{{BUILD_DIR}}/src/platforms/wasi/AtomVM.wasm" ]; then \
+        echo "✓ AtomVM.wasm built successfully"; \
+        echo "  Location: {{BUILD_DIR}}/src/platforms/wasi/AtomVM.wasm"; \
+        echo "  Size: $(du -h {{BUILD_DIR}}/src/platforms/wasi/AtomVM.wasm | cut -f1)"; \
+        if command -v file >/dev/null 2>&1; then \
+            echo "  Type: $(file {{BUILD_DIR}}/src/platforms/wasi/AtomVM.wasm | cut -d: -f2)"; \
+        fi; \
+    else \
+        echo "✗ AtomVM.wasm not built yet"; \
+        echo "  Run: just wasi-build"; \
+    fi
+
+# Clean WASI build only
+wasi-clean:
+    @echo "🧹 Cleaning WASI build..."
+    rm -rf {{BUILD_DIR}}
+    @echo "✓ WASI build cleaned"
+
+# Rebuild WASI from scratch
+wasi-rebuild: wasi-clean wasi-build
+
 # Setup: Install WASI SDK and all dependencies
 setup: install-wasi-sdk
     @echo "✓ Setup complete!"
@@ -242,6 +276,80 @@ dev: clean build
 # CI/CD full build and test
 ci: setup build test
     @echo "✓ CI build complete!"
+
+# WASI integration test - compile and run test programs
+wasi-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "🧪 Running WASI integration tests..."
+
+    # Check prerequisites
+    if [ ! -f "{{BUILD_DIR}}/src/platforms/wasi/AtomVM.wasm" ]; then
+        echo "❌ AtomVM.wasm not found. Run 'just wasi-build' first."
+        exit 1
+    fi
+
+    # Find wasmtime
+    WASMTIME=""
+    if command -v wasmtime &> /dev/null; then
+        WASMTIME="wasmtime"
+    elif [ -f "$HOME/.wasmtime/bin/wasmtime" ]; then
+        WASMTIME="$HOME/.wasmtime/bin/wasmtime"
+    else
+        echo "❌ wasmtime not found. Installing..."
+        just install-wasmtime
+        WASMTIME="$HOME/.wasmtime/bin/wasmtime"
+    fi
+
+    if ! command -v erlc &> /dev/null; then
+        echo "❌ erlc not found. Please install Erlang/OTP."
+        exit 1
+    fi
+
+    # Compile test programs
+    echo "📝 Compiling test programs..."
+    mkdir -p tests/wasi
+    cd tests/wasi
+    erlc simple_test.erl display_test.erl math_test.erl atom_test.erl list_test.erl
+
+    # Run tests
+    echo ""
+    echo "🚀 Running tests with wasmtime..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Only run tests that work without zlib (no compressed literals)
+    TESTS=(simple_test display_test)
+    # TODO: Enable after zlib support: math_test atom_test list_test
+    PASSED=0
+    FAILED=0
+
+    for test in "${TESTS[@]}"; do
+        echo ""
+        echo "▶ Running $test..."
+        OUTPUT=$($WASMTIME run --dir=. ../../{{BUILD_DIR}}/src/platforms/wasi/AtomVM.wasm $test.beam 2>&1)
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -eq 0 ] && echo "$OUTPUT" | grep -q "Return value: ok"; then
+            echo "  ✓ $test passed"
+            PASSED=$((PASSED + 1))
+        else
+            echo "  ✗ $test failed (exit code: $EXIT_CODE)"
+            echo "$OUTPUT" | head -5
+            FAILED=$((FAILED + 1))
+        fi
+    done
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📊 Test Results: $PASSED passed, $FAILED failed"
+
+    if [ $FAILED -eq 0 ]; then
+        echo "✓ All WASI integration tests passed!"
+        exit 0
+    else
+        echo "✗ Some tests failed"
+        exit 1
+    fi
 
 # Install just if not present (helper recipe)
 install-just:

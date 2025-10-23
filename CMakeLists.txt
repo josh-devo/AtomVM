@@ -74,6 +74,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
     set(AVM_DISABLE_SMP ON CACHE BOOL "WASI requires SMP disabled" FORCE)
     set(AVM_DISABLE_TASK_DRIVER ON CACHE BOOL "WASI requires task driver disabled" FORCE)
     set(AVM_DISABLE_JIT ON CACHE BOOL "WASI does not support JIT" FORCE)
+    set(AVM_ENABLE_PRECOMPILED OFF CACHE BOOL "WASI does not support precompiled code" FORCE)
     add_subdirectory(src/platforms/wasi)
 elseif((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") OR
    (${CMAKE_SYSTEM_NAME} STREQUAL "Linux") OR

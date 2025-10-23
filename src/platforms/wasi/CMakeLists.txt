@@ -23,38 +23,76 @@ project(AtomVM_WASI)
 # Platform source files
 set(WASI_PLATFORM_SOURCES
     src/lib/platform_wasi.h
+    src/lib/platform_defaultatoms.h
+    src/lib/platform_defaultatoms.c
+    src/lib/platform_defaultatoms.def
+    src/lib/platform_nifs.c
     src/lib/sys_wasi.c
     src/lib/time_wasi.c
     src/lib/memory_wasi.c
     src/lib/random_wasi.c
 )
 
-# Create platform library
-add_library(atomvm_platform_wasi STATIC ${WASI_PLATFORM_SOURCES})
+# Find mbedtls
+find_library(MBEDTLS_LIBRARY mbedtls)
+find_library(MBEDX509_LIBRARY mbedx509)
+find_library(MBEDCRYPTO_LIBRARY mbedcrypto)
 
-target_include_directories(atomvm_platform_wasi PUBLIC
+# Platform library suffix to match expected naming
+set(PLATFORM_LIB_SUFFIX ${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR})
+
+# Create platform library
+add_library(libAtomVM${PLATFORM_LIB_SUFFIX} STATIC ${WASI_PLATFORM_SOURCES})
+
+target_include_directories(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
     ${CMAKE_SOURCE_DIR}/src/libAtomVM
+    ${CMAKE_BINARY_DIR}/src/libAtomVM  # For avm_version.h
 )
 
-target_link_libraries(atomvm_platform_wasi PUBLIC
+# Force WASI-specific defines for the platform library
+target_compile_definitions(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC
+    AVM_PLATFORM_WASI
+    AVM_NO_SMP
+    AVM_NO_JIT
+    __wasi__
+)
+
+target_link_libraries(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC
     libAtomVM
 )
+
+# Link mbedtls if found, otherwise we'll use WASI random directly
+if(MBEDTLS_LIBRARY)
+    target_link_libraries(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC
+        ${MBEDTLS_LIBRARY}
+        ${MBEDX509_LIBRARY}
+        ${MBEDCRYPTO_LIBRARY}
+    )
+    target_compile_definitions(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC HAVE_MBEDTLS)
+endif()
+
+# Add libAtomVM subdirectory (needed for avm_version.h generation)
+add_subdirectory(../../libAtomVM libAtomVM)
 
 # Main executable
 add_executable(AtomVM.wasm
     src/main.c
 )
 
-target_link_libraries(AtomVM.wasm
-    libAtomVM
-    atomvm_platform_wasi
+target_include_directories(AtomVM.wasm PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/libAtomVM  # For avm_version.h
 )
 
-# WASI-specific compiler flags
+target_link_libraries(AtomVM.wasm
+    libAtomVM
+)
+
+# WASI-specific compiler flags (already set on platform library, but repeat for clarity)
 target_compile_definitions(AtomVM.wasm PRIVATE
     AVM_PLATFORM_WASI
     AVM_NO_SMP
+    AVM_NO_JIT
     __wasi__
 )
 

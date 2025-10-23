@@ -1744,7 +1744,9 @@ term nif_erlang_localtime(Context *ctx, int argc, term argv[])
     if (tz) {
         char *oldtz = getenv("TZ");
         setenv("TZ", tz, 1);
+#ifndef __wasi__
         tzset();
+#endif
         localtime = localtime_r(&ts.tv_sec, &storage);
         if (oldtz) {
             setenv("TZ", oldtz, 1);
@@ -1753,7 +1755,9 @@ term nif_erlang_localtime(Context *ctx, int argc, term argv[])
         }
     } else {
         // Call tzset to handle DST changes
+#ifndef __wasi__
         tzset();
+#endif
         localtime = localtime_r(&ts.tv_sec, &storage);
     }
 #ifndef AVM_NO_SMP

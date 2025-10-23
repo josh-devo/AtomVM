@@ -52,9 +52,11 @@ void sys_init_platform(GlobalContext *glb)
         AVM_ABORT();
     }
 
+#ifdef HAVE_MBEDTLS
     // Initialize random number generation
     platform->entropy_is_initialized = false;
     platform->random_is_initialized = false;
+#endif
 
     // Initialize preopened directories
     platform->has_preopen = false;
@@ -72,6 +74,7 @@ void sys_free_platform(GlobalContext *glb)
 
     struct WASIPlatformData *platform = glb->platform_data;
 
+#ifdef HAVE_MBEDTLS
     if (platform->random_is_initialized) {
         mbedtls_ctr_drbg_free(&platform->random_ctx);
     }
@@ -79,6 +82,7 @@ void sys_free_platform(GlobalContext *glb)
     if (platform->entropy_is_initialized) {
         mbedtls_entropy_free(&platform->entropy_ctx);
     }
+#endif
 
     free(platform);
     glb->platform_data = NULL;
@@ -174,7 +178,6 @@ bool wasi_file_exists(const char *path)
         fd,
         0, // flags
         path,
-        strlen(path),
         &filestat
     );
 
@@ -196,7 +199,6 @@ void *wasi_read_file(const char *path, size_t *size_out)
         3, // Preopened directory fd
         0, // dirflags
         path,
-        strlen(path),
         0, // oflags (0 = open existing)
         __WASI_RIGHTS_FD_READ | __WASI_RIGHTS_FD_SEEK | __WASI_RIGHTS_FD_FILESTAT_GET,
         0, // fs_rights_inheriting
@@ -214,7 +216,7 @@ void *wasi_read_file(const char *path, size_t *size_out)
     err = __wasi_fd_filestat_get(fd, &stat);
     if (err != __WASI_ERRNO_SUCCESS) {
         TRACE("wasi_read_file: Failed to get file stats, errno=%d\n", err);
-        __wasi_fd_close(fd);
+        (void)__wasi_fd_close(fd);
         return NULL;
     }
 
@@ -225,7 +227,7 @@ void *wasi_read_file(const char *path, size_t *size_out)
     uint8_t *buffer = malloc(size);
     if (!buffer) {
         fprintf(stderr, "wasi_read_file: Failed to allocate %zu bytes\n", size);
-        __wasi_fd_close(fd);
+        (void)__wasi_fd_close(fd);
         return NULL;
     }
 
@@ -237,7 +239,7 @@ void *wasi_read_file(const char *path, size_t *size_out)
     size_t nread;
     err = __wasi_fd_read(fd, &iov, 1, &nread);
 
-    __wasi_fd_close(fd);
+    (void)__wasi_fd_close(fd);
 
     if (err != __WASI_ERRNO_SUCCESS || nread != size) {
         TRACE("wasi_read_file: Failed to read file, errno=%d, read=%zu/%zu\n", err, nread, size);
@@ -334,6 +336,8 @@ term sys_get_info(Context *ctx, term key)
 }
 
 // mbedtls integration for random/crypto
+#ifdef HAVE_MBEDTLS
+
 int sys_mbedtls_entropy_func(void *entropy, unsigned char *buf, size_t size)
 {
     return mbedtls_entropy_func(entropy, buf, size);
@@ -400,3 +404,5 @@ void sys_mbedtls_ctr_drbg_context_unlock(GlobalContext *global)
     (void)global;
     // No locking needed in single-threaded WASI
 }
+
+#endif // HAVE_MBEDTLS

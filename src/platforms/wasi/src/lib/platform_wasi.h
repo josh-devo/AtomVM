@@ -27,6 +27,7 @@
 
 #include <wasi/api.h>
 
+#ifdef HAVE_MBEDTLS
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
 
@@ -37,6 +38,7 @@
 #endif
 
 #include "sys_mbedtls.h"
+#endif
 
 // Platform capabilities
 #define PLATFORM_HAS_FILESYSTEM 1
@@ -54,11 +56,13 @@ typedef __wasi_timestamp_t avm_timestamp_t;
  */
 struct WASIPlatformData
 {
+#ifdef HAVE_MBEDTLS
     // Random number generation (mbedtls)
     mbedtls_entropy_context entropy_ctx;
     bool entropy_is_initialized;
     mbedtls_ctr_drbg_context random_ctx;
     bool random_is_initialized;
+#endif
 
     // Preopened directories (for file I/O)
     __wasi_fd_t preopen_fd;

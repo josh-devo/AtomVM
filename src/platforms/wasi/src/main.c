@@ -18,11 +18,13 @@
  * SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
  */
 
-#include <signal.h>
+// WASI doesn't support signals
+// #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+// WASI has limited unistd.h support
+// #include <unistd.h>
 
 #include <avm_version.h>
 #include <avmpack.h>
@@ -135,7 +137,7 @@ static int start(void)
  */
 int main(int argc, char **argv)
 {
-    fprintf(stderr, "AtomVM WASI version %s\n", AVM_VERSION);
+    fprintf(stderr, "AtomVM WASI version %s\n", ATOMVM_VERSION);
 
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <file.avm|file.beam> [additional files...]\n", argv[0]);
