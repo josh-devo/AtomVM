@@ -336,7 +336,7 @@ wasi-test:
     cd tests/wasi
     erlc simple_test.erl display_test.erl math_test.erl atom_test.erl list_test.erl \
          test_zlib_compress.erl spawn_fun1.erl test_ets.erl calculator.erl
-    elixirc --no-docs --no-debug-info calculator.ex
+    elixirc --no-docs --no-debug-info calculator.ex gen_server_test.ex
 
     # Copy library archives for Elixir support
     cp ../../{{BUILD_DIR}}/libs/exavmlib/lib/exavmlib.avm . 2>/dev/null || echo "Warning: exavmlib.avm not found, Elixir tests may fail"
@@ -349,7 +349,7 @@ wasi-test:
 
     # Run all integration tests (zlib support enabled)
     # Note: code_lock excluded (requires gen_statem from OTP libs)
-    TESTS=(simple_test display_test math_test atom_test list_test test_zlib_compress spawn_fun1 test_ets calculator Elixir.Calculator)
+    TESTS=(simple_test display_test math_test atom_test list_test test_zlib_compress spawn_fun1 test_ets calculator Elixir.Calculator Elixir.GenServerTest)
     PASSED=0
     FAILED=0
 
