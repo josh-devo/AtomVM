@@ -72,8 +72,27 @@ if(MBEDTLS_LIBRARY)
     target_compile_definitions(libAtomVM${PLATFORM_LIB_SUFFIX} PUBLIC HAVE_MBEDTLS)
 endif()
 
+# Add zlib support for BEAM decompression
+set(ZLIB_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/external/zlib-wasi/include")
+set(ZLIB_LIBRARY "${CMAKE_SOURCE_DIR}/external/zlib-wasi/lib/libz.a")
+
+if(EXISTS "${ZLIB_LIBRARY}")
+    message(STATUS "Found zlib for WASI: ${ZLIB_LIBRARY}")
+    set(ZLIB_FOUND TRUE)
+else()
+    message(WARNING "zlib not found for WASI. Run: bash external/build-zlib-wasi.sh")
+    set(ZLIB_FOUND FALSE)
+endif()
+
 # Add libAtomVM subdirectory (needed for avm_version.h generation)
 add_subdirectory(../../libAtomVM libAtomVM)
+
+# Enable zlib support in libAtomVM for WASI
+if(ZLIB_FOUND)
+    target_compile_definitions(libAtomVM PUBLIC WITH_ZLIB)
+    target_include_directories(libAtomVM PUBLIC ${ZLIB_INCLUDE_DIR})
+    target_link_libraries(libAtomVM PUBLIC ${ZLIB_LIBRARY})
+endif()
 
 # Main executable
 add_executable(AtomVM.wasm

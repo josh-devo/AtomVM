@@ -32,3 +32,6 @@ src/platforms/esp32/sdkconfig
 .clang-tidy
 
 build-wasi/**
+tools/wasi-sdk-22*
+external/zlib-wasi
+external/zlib
