@@ -49,11 +49,12 @@ build-packbeam:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "🔧 Building PackBEAM natively..."
+    rm -rf build-native
     mkdir -p build-native
     cd build-native
     cmake .. -DCMAKE_BUILD_TYPE=Release \
         -DZLIB_INCLUDE_DIR=/usr/include \
-        -DZLIB_LIBRARY_RELEASE=/usr/lib/x86_64-linux-gnu/libz.so
+        -DZLIB_LIBRARY_RELEASE=/usr/lib/x86_64-linux-gnu/libz.a
     make -j$(nproc) PackBEAM
     echo "✓ PackBEAM built at build-native/tools/packbeam/PackBEAM"
 
@@ -127,6 +128,10 @@ configure: create-toolchain build-packbeam
     mkdir -p tools/packbeam
     ln -sf $(pwd)/../build-native/tools/packbeam/PackBEAM tools/packbeam/PackBEAM
 
+    # Also symlink for exavmlib which looks in libs/exavmlib/lib
+    mkdir -p libs/exavmlib/lib
+    ln -sf $(pwd)/../build-native/tools/packbeam/PackBEAM libs/exavmlib/lib/PackBEAM
+
     echo "✓ Configuration complete!"
 
 # Build AtomVM for WASI
@@ -139,7 +144,8 @@ build: configure
     make -j$(nproc)
 
     echo "✓ Build complete!"
-    echo "  Output: {{BUILD_DIR}}/src/AtomVM.wasm"
+    echo "  Output: {{BUILD_DIR}}/src/platforms/wasi/AtomVM.wasm"
+    echo "  Libraries built in {{BUILD_DIR}}/libs"
 
 # Clean build artifacts
 clean:
@@ -330,6 +336,11 @@ wasi-test:
     cd tests/wasi
     erlc simple_test.erl display_test.erl math_test.erl atom_test.erl list_test.erl \
          test_zlib_compress.erl spawn_fun1.erl test_ets.erl calculator.erl
+    elixirc --no-docs --no-debug-info calculator.ex
+
+    # Copy library archives for Elixir support
+    cp ../../{{BUILD_DIR}}/libs/exavmlib/lib/exavmlib.avm . 2>/dev/null || echo "Warning: exavmlib.avm not found, Elixir tests may fail"
+    cp ../../{{BUILD_DIR}}/libs/estdlib/src/estdlib.avm . 2>/dev/null || echo "Warning: estdlib.avm not found, some tests may fail"
 
     # Run tests
     echo ""
@@ -338,7 +349,7 @@ wasi-test:
 
     # Run all integration tests (zlib support enabled)
     # Note: code_lock excluded (requires gen_statem from OTP libs)
-    TESTS=(simple_test display_test math_test atom_test list_test test_zlib_compress spawn_fun1 test_ets calculator)
+    TESTS=(simple_test display_test math_test atom_test list_test test_zlib_compress spawn_fun1 test_ets calculator Elixir.Calculator)
     PASSED=0
     FAILED=0
 
@@ -346,7 +357,7 @@ wasi-test:
         echo ""
         echo "▶ Running $test..."
         set +e  # Temporarily allow commands to fail
-        OUTPUT=$($WASMTIME run --dir=. ../../{{BUILD_DIR}}/src/platforms/wasi/AtomVM.wasm $test.beam 2>&1)
+        OUTPUT=$($WASMTIME run --dir=. ../../{{BUILD_DIR}}/src/platforms/wasi/AtomVM.wasm estdlib.avm exavmlib.avm $test.beam 2>&1)
         EXIT_CODE=$?
         set -e  # Re-enable exit on error
         # Accept tests that return ok or integer values (0, 42, etc.)
