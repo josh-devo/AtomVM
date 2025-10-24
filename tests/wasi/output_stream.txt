@@ -1,5 +1,8 @@
+AtomVM WASI version 0.7.0-dev+git.83ea5125
 Line 1: First line of test data
 Line 2: Second line with some numbers 12345
 Line 3: Third line with special chars !@#$%
 Line 4: Fourth line testing streaming
 Line 5: Fifth and final line of data
+Return value: ok
+AtomVM WASI exiting with status 0

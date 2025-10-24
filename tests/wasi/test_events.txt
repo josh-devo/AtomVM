@@ -1,0 +1,5 @@
+user_login:alice
+data_update:temperature=25C
+notification:hello_from_host
+STATS
+QUIT
