@@ -27,6 +27,7 @@
 #include "nifs.h"
 #include "platform_defaultatoms.h"
 #include "term.h"
+#include "wasi_file_nifs.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,12 @@ const struct Nif *platform_nifs_get_nif(const char *nifname)
 {
     if (strcmp("atomvm:platform/0", nifname) == 0) {
         return &atomvm_platform_nif;
+    }
+
+    // Try file NIFs
+    const struct Nif *nif = wasi_file_nifs_get_nif(nifname);
+    if (nif != NULL) {
+        return nif;
     }
 
     return NULL;

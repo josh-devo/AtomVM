@@ -20,11 +20,23 @@
 
 -module(file).
 
--export([native_name_encoding/0, get_cwd/0]).
+-export([native_name_encoding/0, get_cwd/0, read_file/1, write_file/2, read_file_info/1]).
 
 -spec native_name_encoding() -> latin1 | utf8.
 native_name_encoding() ->
     utf8.
 
 get_cwd() ->
+    erlang:nif_error(undefined).
+
+-spec read_file(Filename :: string() | binary()) -> {ok, binary()} | {error, term()}.
+read_file(_Filename) ->
+    erlang:nif_error(undefined).
+
+-spec write_file(Filename :: string() | binary(), Bytes :: iodata()) -> ok | {error, term()}.
+write_file(_Filename, _Bytes) ->
+    erlang:nif_error(undefined).
+
+-spec read_file_info(Filename :: string() | binary()) -> {ok, tuple()} | {error, term()}.
+read_file_info(_Filename) ->
     erlang:nif_error(undefined).
