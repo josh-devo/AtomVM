@@ -123,9 +123,9 @@ target_compile_options(AtomVM.wasm PRIVATE
     -fno-exceptions
 )
 
-# WASI-specific linker flags
+# WASI-specific linker flags - adjusted for wasm32-wasip2 component model
 set_target_properties(AtomVM.wasm PROPERTIES
-    LINK_FLAGS "-Wl,--allow-undefined -Wl,--export-dynamic -Wl,--no-entry -Wl,--export=main -Wl,--export=_start"
+    LINK_FLAGS "-Wl,--no-entry -Wl,--export=main -Wl,--export=_start"
     OUTPUT_NAME "AtomVM"
     SUFFIX ".wasm"
 )

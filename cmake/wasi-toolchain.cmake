@@ -12,12 +12,12 @@ set(CMAKE_RANLIB "${WASI_SDK_PREFIX}/bin/llvm-ranlib")
 set(CMAKE_SYSROOT "${WASI_SDK_PREFIX}/share/wasi-sysroot")
 
 # Compiler flags
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --target=wasm32-wasi")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --target=wasm32-wasi")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --target=wasm32-wasip2")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --target=wasm32-wasip2")
 
 # Linker flags
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--allow-undefined")
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--export-dynamic")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--no-entry")
 
 # Find programs in the host environment

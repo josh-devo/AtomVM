@@ -1,0 +1,130 @@
+module 'test_tcp_minimal' ['module_info'/0,
+			   'module_info'/1,
+			   'start'/0]
+    attributes [%% Line 1
+		'file' =
+		    %% Line 1
+		    [{[116|[101|[115|[116|[95|[116|[99|[112|[95|[109|[105|[110|[105|[109|[97|[108|[46|[101|[114|[108]]]]]]]]]]]]]]]]]]]],1}]]
+'start'/0 =
+    %% Line 7
+    ( fun () ->
+	  %% Line 8
+	  case call 'gen_tcp':'connect'
+		   ([49|[50|[55|[46|[48|[46|[48|[46|[49]]]]]]]]], 8080, ['binary'|[{'active','false'}]], 5000) of
+	    %% Line 9
+	    <{'ok',Socket}> when 'true' ->
+		%% Line 12
+		case call 'gen_tcp':'send'
+			 (Socket, #{#<72>(8,1,'integer',['unsigned'|['big']]),
+				    #<101>(8,1,'integer',['unsigned'|['big']]),
+				    #<108>(8,1,'integer',['unsigned'|['big']]),
+				    #<108>(8,1,'integer',['unsigned'|['big']]),
+				    #<111>(8,1,'integer',['unsigned'|['big']]),
+				    #<32>(8,1,'integer',['unsigned'|['big']]),
+				    #<102>(8,1,'integer',['unsigned'|['big']]),
+				    #<114>(8,1,'integer',['unsigned'|['big']]),
+				    #<111>(8,1,'integer',['unsigned'|['big']]),
+				    #<109>(8,1,'integer',['unsigned'|['big']]),
+				    #<32>(8,1,'integer',['unsigned'|['big']]),
+				    #<65>(8,1,'integer',['unsigned'|['big']]),
+				    #<116>(8,1,'integer',['unsigned'|['big']]),
+				    #<111>(8,1,'integer',['unsigned'|['big']]),
+				    #<109>(8,1,'integer',['unsigned'|['big']]),
+				    #<86>(8,1,'integer',['unsigned'|['big']]),
+				    #<77>(8,1,'integer',['unsigned'|['big']]),
+				    #<32>(8,1,'integer',['unsigned'|['big']]),
+				    #<87>(8,1,'integer',['unsigned'|['big']]),
+				    #<65>(8,1,'integer',['unsigned'|['big']]),
+				    #<83>(8,1,'integer',['unsigned'|['big']]),
+				    #<73>(8,1,'integer',['unsigned'|['big']])}#) of
+		  %% Line 13
+		  <'ok'> when 'true' ->
+		      %% Line 15
+		      case call 'gen_tcp':'recv'
+			       (Socket, 0, 5000) of
+			%% Line 16
+			<{'ok',Data}> when 'true' ->
+			    do  %% Line 18
+				call 'gen_tcp':'close'
+				    (Socket)
+				%% Line 19
+				case <> of
+				  %% Line 20
+				  <>
+				      when call 'erlang':'=:='
+					    (Data,
+					     #{#<72>(8,1,'integer',['unsigned'|['big']]),
+					       #<101>(8,1,'integer',['unsigned'|['big']]),
+					       #<108>(8,1,'integer',['unsigned'|['big']]),
+					       #<108>(8,1,'integer',['unsigned'|['big']]),
+					       #<111>(8,1,'integer',['unsigned'|['big']]),
+					       #<32>(8,1,'integer',['unsigned'|['big']]),
+					       #<102>(8,1,'integer',['unsigned'|['big']]),
+					       #<114>(8,1,'integer',['unsigned'|['big']]),
+					       #<111>(8,1,'integer',['unsigned'|['big']]),
+					       #<109>(8,1,'integer',['unsigned'|['big']]),
+					       #<32>(8,1,'integer',['unsigned'|['big']]),
+					       #<65>(8,1,'integer',['unsigned'|['big']]),
+					       #<116>(8,1,'integer',['unsigned'|['big']]),
+					       #<111>(8,1,'integer',['unsigned'|['big']]),
+					       #<109>(8,1,'integer',['unsigned'|['big']]),
+					       #<86>(8,1,'integer',['unsigned'|['big']]),
+					       #<77>(8,1,'integer',['unsigned'|['big']]),
+					       #<32>(8,1,'integer',['unsigned'|['big']]),
+					       #<87>(8,1,'integer',['unsigned'|['big']]),
+					       #<65>(8,1,'integer',['unsigned'|['big']]),
+					       #<83>(8,1,'integer',['unsigned'|['big']]),
+					       #<73>(8,1,'integer',['unsigned'|['big']])}#) ->
+				      %% Line 21
+				      'ok'
+				  %% Line 22
+				  <> when 'true' ->
+				      %% Line 23
+				      {'error','echo_mismatch'}
+				end
+			%% Line 25
+			<_@r0 = {'error',RecvError}> when 'true' ->
+			    do  %% Line 26
+				call 'gen_tcp':'close'
+				    (Socket)
+				%% Line 27
+				_@r0
+			( <_1> when 'true' ->
+			      primop 'match_fail'
+				  ({'case_clause',_1})
+			  -| ['compiler_generated'] )
+		      end
+		  %% Line 29
+		  <_@r1 = {'error',SendError}> when 'true' ->
+		      do  %% Line 30
+			  call 'gen_tcp':'close'
+			      (Socket)
+			  %% Line 31
+			  _@r1
+		  ( <_2> when 'true' ->
+			primop 'match_fail'
+			    ({'case_clause',_2})
+		    -| ['compiler_generated'] )
+		end
+	    %% Line 33
+	    <_@r2 = {'error',ConnectError}> when 'true' ->
+		%% Line 34
+		_@r2
+	    ( <_3> when 'true' ->
+		  primop 'match_fail'
+		      ({'case_clause',_3})
+	      -| ['compiler_generated'] )
+	  end
+      -| [{'function',{'start',0}}] )
+'module_info'/0 =
+    ( fun () ->
+	  call 'erlang':'get_module_info'
+	      ('test_tcp_minimal')
+      -| [{'function',{'module_info',0}}] )
+'module_info'/1 =
+    ( fun (_0) ->
+	  call 'erlang':'get_module_info'
+	      ('test_tcp_minimal', ( _0
+				     -| [{'function',{'module_info',1}}] ))
+      -| [{'function',{'module_info',1}}] )
+end

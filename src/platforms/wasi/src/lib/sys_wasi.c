@@ -21,6 +21,7 @@
 #include <sys.h>
 
 #include "platform_wasi.h"
+#include "wasi_net.h"
 
 #include <avmpack.h>
 #include <context.h>
@@ -313,15 +314,17 @@ Module *sys_load_module_from_file(GlobalContext *global, const char *path)
     return new_module;
 }
 
-// Port creation (not supported in WASI)
+// Port creation
 Context *sys_create_port(GlobalContext *glb, const char *driver_name, term opts)
 {
-    (void)glb;
-    (void)driver_name;
-    (void)opts;
+    TRACE("sys_create_port: Creating port for driver '%s'\n", driver_name);
 
-    TRACE("sys_create_port: Ports not supported in WASI platform\n");
+    if (strcmp(driver_name, "socket") == 0) {
+        TRACE("sys_create_port: Initializing socket driver\n");
+        return wasi_socket_init(glb, opts);
+    }
 
+    TRACE("sys_create_port: Unknown driver '%s'\n", driver_name);
     return NULL;
 }
 

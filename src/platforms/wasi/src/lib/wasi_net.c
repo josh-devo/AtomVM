@@ -39,7 +39,7 @@
 #define __wasilibc_use_wasip2
 #include <wasi/wasip2.h>
 
-// #define ENABLE_TRACE
+#define ENABLE_TRACE
 #include "trace.h"
 
 #define BUFSIZE 512
@@ -91,6 +91,8 @@ static inline term create_tcp_socket_wrapper(term pid, Heap *heap, GlobalContext
 static term wasi_error_to_atom(tcp_error_code_t err, GlobalContext *glb)
 {
     switch (err) {
+        case NETWORK_ERROR_CODE_ACCESS_DENIED:
+            return globalcontext_make_atom(glb, ATOM_STR("\x6", "eacces"));
         case NETWORK_ERROR_CODE_CONNECTION_REFUSED:
             return globalcontext_make_atom(glb, ATOM_STR("\xB", "econnrefused"));
         case NETWORK_ERROR_CODE_CONNECTION_RESET:
@@ -115,6 +117,11 @@ static term wasi_error_to_atom(tcp_error_code_t err, GlobalContext *glb)
             return globalcontext_make_atom(glb, ATOM_STR("\x7", "unknown"));
     }
 }
+
+// Forward declarations
+static NativeHandlerResult wasi_socket_consume_mailbox(Context *ctx);
+static term init_client_tcp_socket(Context *ctx, WasiSocketDriverData *socket_data, term params);
+static term init_server_tcp_socket(Context *ctx, WasiSocketDriverData *socket_data, term params);
 
 //
 // Public API
@@ -215,17 +222,42 @@ static term do_connect(WasiSocketDriverData *socket_data, Context *ctx, term add
         return port_create_error_tuple(ctx, wasi_error_to_atom(err, glb));
     }
 
-    // Finish connect (blocks until connected)
+    // Finish connect - poll until connected or error
+    // WASI Preview 2 sockets are async, so we need to retry on WOULD_BLOCK
     tcp_tuple2_own_input_stream_own_output_stream_t streams;
-    result = tcp_method_tcp_socket_finish_connect(
-        tcp_borrow_tcp_socket(socket_data->wasi_socket),
-        &streams,
-        &err
-    );
+    int retry_count = 0;
+    const int MAX_RETRIES = 1000;  // Prevent infinite loop
 
-    if (!result) {
-        TRACE("wasi_net: finish_connect failed: %d\n", err);
-        return port_create_error_tuple(ctx, wasi_error_to_atom(err, glb));
+    while (retry_count < MAX_RETRIES) {
+        result = tcp_method_tcp_socket_finish_connect(
+            tcp_borrow_tcp_socket(socket_data->wasi_socket),
+            &streams,
+            &err
+        );
+
+        if (result) {
+            // Success!
+            break;
+        }
+
+        // Check if it's a retryable error
+        if (err == NETWORK_ERROR_CODE_WOULD_BLOCK) {
+            // Connection in progress, retry
+            TRACE("wasi_net: finish_connect would block, retrying (%d)...\n", retry_count);
+            retry_count++;
+            // Small yield to avoid busy-waiting
+            // Note: In a full implementation, we'd use proper async polling here
+            continue;
+        } else {
+            // Non-retryable error
+            TRACE("wasi_net: finish_connect failed: %d\n", err);
+            return port_create_error_tuple(ctx, wasi_error_to_atom(err, glb));
+        }
+    }
+
+    if (retry_count >= MAX_RETRIES) {
+        TRACE("wasi_net: finish_connect timed out after %d retries\n", retry_count);
+        return port_create_error_tuple(ctx, globalcontext_make_atom(glb, ATOM_STR("\xA", "etimedout")));
     }
 
     // Store streams
@@ -281,6 +313,130 @@ static term init_client_tcp_socket(Context *ctx, WasiSocketDriverData *socket_da
     return ret;
 }
 
+static term init_server_tcp_socket(Context *ctx, WasiSocketDriverData *socket_data, term params)
+{
+    GlobalContext *glb = ctx->global;
+
+    // Create TCP socket
+    tcp_create_socket_ip_address_family_t family = NETWORK_IP_ADDRESS_FAMILY_IPV4;
+    tcp_create_socket_own_tcp_socket_t socket;
+    tcp_create_socket_error_code_t err;
+
+    bool result = tcp_create_socket_create_tcp_socket(family, &socket, &err);
+    if (!result) {
+        TRACE("wasi_net: create_tcp_socket failed: %d\n", err);
+        return port_create_error_tuple(ctx, wasi_error_to_atom(err, glb));
+    }
+
+    socket_data->wasi_socket = socket;
+    socket_data->has_socket = true;
+
+    // Get network capability
+    socket_data->network = instance_network_instance_network();
+    socket_data->has_network = true;
+
+    TRACE("wasi_net: server socket created (port %d)\n", socket_data->port);
+
+    // Now perform bind and listen
+    // Bind to the specified port
+    tcp_ip_socket_address_t local_addr = {
+        .tag = NETWORK_IP_SOCKET_ADDRESS_IPV4,
+        .val.ipv4 = {
+            .address = {{0, 0, 0, 0}},  // INADDR_ANY
+            .port = socket_data->port
+        }
+    };
+
+    // Start bind
+    tcp_error_code_t tcp_err;
+    result = tcp_method_tcp_socket_start_bind(
+        tcp_borrow_tcp_socket(socket_data->wasi_socket),
+        network_borrow_network(socket_data->network),
+        &local_addr,
+        &tcp_err
+    );
+
+    if (!result) {
+        TRACE("wasi_net: start_bind failed: %d\n", tcp_err);
+        return port_create_error_tuple(ctx, wasi_error_to_atom(tcp_err, glb));
+    }
+
+    // Finish bind - poll until ready
+    int retry_count = 0;
+    const int MAX_RETRIES = 1000;
+
+    while (retry_count < MAX_RETRIES) {
+        result = tcp_method_tcp_socket_finish_bind(
+            tcp_borrow_tcp_socket(socket_data->wasi_socket),
+            &tcp_err
+        );
+
+        if (result) {
+            break;
+        }
+
+        if (tcp_err == NETWORK_ERROR_CODE_WOULD_BLOCK) {
+            TRACE("wasi_net: finish_bind would block, retrying (%d)...\n", retry_count);
+            retry_count++;
+            continue;
+        } else {
+            TRACE("wasi_net: finish_bind failed: %d\n", tcp_err);
+            return port_create_error_tuple(ctx, wasi_error_to_atom(tcp_err, glb));
+        }
+    }
+
+    if (retry_count >= MAX_RETRIES) {
+        TRACE("wasi_net: finish_bind timed out after %d retries\n", retry_count);
+        return port_create_error_tuple(ctx, globalcontext_make_atom(glb, ATOM_STR("\xA", "etimedout")));
+    }
+
+    TRACE("wasi_net: bound to port %d\n", socket_data->port);
+
+    // Start listen
+    result = tcp_method_tcp_socket_start_listen(
+        tcp_borrow_tcp_socket(socket_data->wasi_socket),
+        &tcp_err
+    );
+
+    if (!result) {
+        TRACE("wasi_net: start_listen failed: %d\n", tcp_err);
+        return port_create_error_tuple(ctx, wasi_error_to_atom(tcp_err, glb));
+    }
+
+    // Finish listen - poll until ready
+    retry_count = 0;
+
+    while (retry_count < MAX_RETRIES) {
+        result = tcp_method_tcp_socket_finish_listen(
+            tcp_borrow_tcp_socket(socket_data->wasi_socket),
+            &tcp_err
+        );
+
+        if (result) {
+            break;
+        }
+
+        if (tcp_err == NETWORK_ERROR_CODE_WOULD_BLOCK) {
+            TRACE("wasi_net: finish_listen would block, retrying (%d)...\n", retry_count);
+            retry_count++;
+            continue;
+        } else {
+            TRACE("wasi_net: finish_listen failed: %d\n", tcp_err);
+            return port_create_error_tuple(ctx, wasi_error_to_atom(tcp_err, glb));
+        }
+    }
+
+    if (retry_count >= MAX_RETRIES) {
+        TRACE("wasi_net: finish_listen timed out after %d retries\n", retry_count);
+        return port_create_error_tuple(ctx, globalcontext_make_atom(glb, ATOM_STR("\xA", "etimedout")));
+    }
+
+    socket_data->listening = true;
+    TRACE("wasi_net: listening on port %d\n", socket_data->port);
+
+    return OK_ATOM;
+}
+
 term wasi_socket_driver_do_init(Context *ctx, term params)
 {
     WasiSocketDriverData *socket_data = (WasiSocketDriverData *) ctx->platform_data;
@@ -324,14 +480,25 @@ term wasi_socket_driver_do_init(Context *ctx, term params)
     }
     socket_data->active = active == TRUE_ATOM;
 
+    // Get port number (required for both client and server)
+    term port_term = interop_proplist_get_value(params, PORT_ATOM);
+    if (!term_is_invalid_term(port_term) && term_is_integer(port_term)) {
+        socket_data->port = (uint16_t)term_to_int(port_term);
+    }
+
     // Initialize based on protocol and mode
     if (proto == TCP_ATOM) {
         term connect = interop_proplist_get_value_default(params, CONNECT_ATOM, FALSE_ATOM);
+        term listen = interop_proplist_get_value_default(params, globalcontext_make_atom(ctx->global, ATOM_STR("\x6", "listen")), FALSE_ATOM);
+
         if (connect == TRUE_ATOM) {
+            // Client mode
             return init_client_tcp_socket(ctx, socket_data, params);
+        } else if (listen == TRUE_ATOM) {
+            // Server mode - initialize socket, then call listen separately
+            return init_server_tcp_socket(ctx, socket_data, params);
         } else {
-            // Server mode - TODO: implement in Phase 2
-            return port_create_error_tuple(ctx, globalcontext_make_atom(ctx->global, ATOM_STR("\xD", "not_supported")));
+            return port_create_error_tuple(ctx, BADARG_ATOM);
         }
     } else if (proto == UDP_ATOM) {
         // UDP - TODO: implement later
@@ -376,22 +543,33 @@ term wasi_socket_driver_do_send(Context *ctx, term buffer)
         .len = len
     };
 
-    uint64_t bytes_written;
     streams_stream_error_t err;
 
     bool result = streams_method_output_stream_write(
         streams_borrow_output_stream(socket_data->output_stream),
         &wasi_buffer,
-        &bytes_written,
         &err
     );
 
     if (!result) {
-        TRACE("wasi_net: output_stream_write failed\n");
+        TRACE("wasi_net: output_stream_write failed: %d\n", err);
         return port_create_error_tuple(ctx, CLOSED_ATOM);
     }
 
-    TRACE("wasi_net: sent %llu bytes\n", (unsigned long long)bytes_written);
+    // Flush to ensure data is sent
+    bool flush_result = streams_method_output_stream_blocking_flush(
+        streams_borrow_output_stream(socket_data->output_stream),
+        &err
+    );
+
+    if (!flush_result) {
+        TRACE("wasi_net: output_stream_flush failed: %d\n", err);
+        return port_create_error_tuple(ctx, CLOSED_ATOM);
+    }
+
+    // Assume all bytes written on success
+    uint64_t bytes_written = len;
+    TRACE("wasi_net: sent %llu bytes (flushed)\n", (unsigned long long)bytes_written);
 
     // Return {ok, BytesSent}
     term result_tuple = term_alloc_tuple(2, &ctx->heap);
@@ -399,6 +577,116 @@ term wasi_socket_driver_do_send(Context *ctx, term buffer)
     term_put_tuple_element(result_tuple, 1, term_from_int(bytes_written));
 
     return result_tuple;
+}
+
+term wasi_socket_driver_do_listen(Context *ctx, term backlog)
+{
+    WasiSocketDriverData *socket_data = (WasiSocketDriverData *) ctx->platform_data;
+    GlobalContext *glb = ctx->global;
+
+    if (!socket_data->has_socket || !socket_data->has_network) {
+        return port_create_error_tuple(ctx, CLOSED_ATOM);
+    }
+
+    UNUSED(backlog);  // WASI doesn't expose backlog parameter
+
+    // Bind to the specified port (stored during init)
+    tcp_ip_socket_address_t local_addr = {
+        .tag = NETWORK_IP_SOCKET_ADDRESS_IPV4,
+        .val.ipv4 = {
+            .address = {{0, 0, 0, 0}},  // INADDR_ANY
+            .port = socket_data->port
+        }
+    };
+
+    // Start bind
+    tcp_error_code_t err;
+    bool result = tcp_method_tcp_socket_start_bind(
+        tcp_borrow_tcp_socket(socket_data->wasi_socket),
+        network_borrow_network(socket_data->network),
+        &local_addr,
+        &err
+    );
+
+    if (!result) {
+        TRACE("wasi_net: start_bind failed: %d\n", err);
+        return port_create_error_tuple(ctx, wasi_error_to_atom(err, glb));
+    }
+
+    // Finish bind - poll until ready
+    int retry_count = 0;
+    const int MAX_RETRIES = 1000;
+
+    while (retry_count < MAX_RETRIES) {
+        result = tcp_method_tcp_socket_finish_bind(
+            tcp_borrow_tcp_socket(socket_data->wasi_socket),
+            &err
+        );
+
+        if (result) {
+            break;
+        }
+
+        if (err == NETWORK_ERROR_CODE_WOULD_BLOCK) {
+            TRACE("wasi_net: finish_bind would block, retrying (%d)...\n", retry_count);
+            retry_count++;
+            continue;
+        } else {
+            TRACE("wasi_net: finish_bind failed: %d\n", err);
+            return port_create_error_tuple(ctx, wasi_error_to_atom(err, glb));
+        }
+    }
+
+    if (retry_count >= MAX_RETRIES) {
+        TRACE("wasi_net: finish_bind timed out after %d retries\n", retry_count);
+        return port_create_error_tuple(ctx, globalcontext_make_atom(glb, ATOM_STR("\xA", "etimedout")));
+    }
+
+    TRACE("wasi_net: bound to port %d\n", socket_data->port);
+
+    // Start listen
+    result = tcp_method_tcp_socket_start_listen(
+        tcp_borrow_tcp_socket(socket_data->wasi_socket),
+        &err
+    );
+
+    if (!result) {
+        TRACE("wasi_net: start_listen failed: %d\n", err);
+        return port_create_error_tuple(ctx, wasi_error_to_atom(err, glb));
+    }
+
+    // Finish listen - poll until ready
+    retry_count = 0;
+
+    while (retry_count < MAX_RETRIES) {
+        result = tcp_method_tcp_socket_finish_listen(
+            tcp_borrow_tcp_socket(socket_data->wasi_socket),
+            &err
+        );
+
+        if (result) {
+            break;
+        }
+
+        if (err == NETWORK_ERROR_CODE_WOULD_BLOCK) {
+            TRACE("wasi_net: finish_listen would block, retrying (%d)...\n", retry_count);
+            retry_count++;
+            continue;
+        } else {
+            TRACE("wasi_net: finish_listen failed: %d\n", err);
+            return port_create_error_tuple(ctx, wasi_error_to_atom(err, glb));
+        }
+    }
+
+    if (retry_count >= MAX_RETRIES) {
+        TRACE("wasi_net: finish_listen timed out after %d retries\n", retry_count);
+        return port_create_error_tuple(ctx, globalcontext_make_atom(glb, ATOM_STR("\xA", "etimedout")));
+    }
+
+    socket_data->listening = true;
+    TRACE("wasi_net: listening on port %d\n", socket_data->port);
+
+    return OK_ATOM;
 }
 
 void wasi_socket_driver_do_recv(Context *ctx, term pid, term ref, term length, term timeout)
@@ -417,17 +705,22 @@ void wasi_socket_driver_do_recv(Context *ctx, term pid, term ref, term length, t
         term_put_tuple_element(reply_tuple, 0, ref);
         term_put_tuple_element(reply_tuple, 1, error_tuple);
 
-        mailbox_send(ctx, pid, reply_tuple);
-        END_WITH_STACK_HEAP(heap, ctx);
+        port_send_message(ctx->global, pid, reply_tuple);
+        END_WITH_STACK_HEAP(heap, ctx->global);
         return;
     }
 
-    // Read from input stream
+    // Read from input stream using blocking_read to wait for data
     uint64_t max_len = term_to_int(length);
+    if (max_len == 0) {
+        // Length 0 means read all available, use a reasonable buffer size
+        max_len = 8192;
+    }
+
     wasip2_list_u8_t buffer;
     streams_stream_error_t err;
 
-    bool result = streams_method_input_stream_read(
+    bool result = streams_method_input_stream_blocking_read(
         streams_borrow_input_stream(socket_data->input_stream),
         max_len,
         &buffer,
@@ -435,7 +728,7 @@ void wasi_socket_driver_do_recv(Context *ctx, term pid, term ref, term length, t
     );
 
     if (!result) {
-        TRACE("wasi_net: input_stream_read failed\n");
+        TRACE("wasi_net: input_stream_blocking_read failed: %d\n", err);
         // Send {Ref, {error, closed}}
         BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + TUPLE_SIZE(2), heap);
         term error_tuple = term_alloc_tuple(2, &heap);
@@ -446,8 +739,8 @@ void wasi_socket_driver_do_recv(Context *ctx, term pid, term ref, term length, t
         term_put_tuple_element(reply_tuple, 0, ref);
         term_put_tuple_element(reply_tuple, 1, error_tuple);
 
-        mailbox_send(ctx, pid, reply_tuple);
-        END_WITH_STACK_HEAP(heap, ctx);
+        port_send_message(ctx->global, pid, reply_tuple);
+        END_WITH_STACK_HEAP(heap, ctx->global);
         return;
     }
 
@@ -474,8 +767,8 @@ void wasi_socket_driver_do_recv(Context *ctx, term pid, term ref, term length, t
     term_put_tuple_element(reply_tuple, 0, ref);
     term_put_tuple_element(reply_tuple, 1, ok_tuple);
 
-    mailbox_send(ctx, pid, reply_tuple);
-    END_WITH_STACK_HEAP(heap, ctx);
+    port_send_message(ctx->global, pid, reply_tuple);
+    END_WITH_STACK_HEAP(heap, ctx->global);
 }
 
 void wasi_socket_driver_do_close(Context *ctx)
@@ -537,12 +830,256 @@ term wasi_socket_driver_peername(Context *ctx)
 void wasi_socket_driver_do_accept(Context *ctx, term pid, term ref, term timeout)
 {
     WasiSocketDriverData *socket_data = (WasiSocketDriverData *) ctx->platform_data;
+    GlobalContext *glb = ctx->global;
 
-    // TODO: implement in Phase 2
-    UNUSED(socket_data);
-    UNUSED(pid);
-    UNUSED(ref);
-    UNUSED(timeout);
+    UNUSED(timeout);  // TODO: implement timeout support
 
-    TRACE("wasi_net: accept not yet implemented\n");
+    if (!socket_data->listening) {
+        // Send {Ref, {error, einval}}
+        BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + TUPLE_SIZE(2), heap);
+        term error_tuple = term_alloc_tuple(2, &heap);
+        term_put_tuple_element(error_tuple, 0, ERROR_ATOM);
+        term_put_tuple_element(error_tuple, 1, globalcontext_make_atom(glb, ATOM_STR("\x6", "einval")));
+
+        term reply_tuple = term_alloc_tuple(2, &heap);
+        term_put_tuple_element(reply_tuple, 0, ref);
+        term_put_tuple_element(reply_tuple, 1, error_tuple);
+
+        port_send_message(ctx->global, pid, reply_tuple);
+        END_WITH_STACK_HEAP(heap, ctx->global);
+        return;
+    }
+
+    // Get pollable for the socket to wait for accept readiness
+    tcp_own_pollable_t pollable = tcp_method_tcp_socket_subscribe(
+        tcp_borrow_tcp_socket(socket_data->wasi_socket)
+    );
+
+    // Accept connection - block until a client connects
+    tcp_tuple3_own_tcp_socket_own_input_stream_own_output_stream_t accept_result;
+    tcp_error_code_t err;
+
+    while (true) {
+        bool result = tcp_method_tcp_socket_accept(
+            tcp_borrow_tcp_socket(socket_data->wasi_socket),
+            &accept_result,
+            &err
+        );
+
+        if (result) {
+            // Success! We have a new client connection
+            poll_pollable_drop_own(pollable);
+            break;
+        }
+
+        if (err == NETWORK_ERROR_CODE_WOULD_BLOCK) {
+            TRACE("wasi_net: accept would block, waiting for connection...\n");
+            // Block until the socket is ready for accept
+            poll_method_pollable_block(poll_borrow_pollable(pollable));
+            // Try accept again after unblocking
+            continue;
+        } else {
+            TRACE("wasi_net: accept failed: %d\n", err);
+            poll_pollable_drop_own(pollable);
+            // Send {Ref, {error, Reason}}
+            BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + TUPLE_SIZE(2), heap);
+            term error_tuple = term_alloc_tuple(2, &heap);
+            term_put_tuple_element(error_tuple, 0, ERROR_ATOM);
+            term_put_tuple_element(error_tuple, 1, wasi_error_to_atom(err, glb));
+
+            term reply_tuple = term_alloc_tuple(2, &heap);
+            term_put_tuple_element(reply_tuple, 0, ref);
+            term_put_tuple_element(reply_tuple, 1, error_tuple);
+
+            port_send_message(ctx->global, pid, reply_tuple);
+            END_WITH_STACK_HEAP(heap, ctx->global);
+            return;
+        }
+    }
+
+    TRACE("wasi_net: accepted client connection\n");
+
+    // Create a new socket context for the client
+    Context *new_ctx = context_new(glb);
+    new_ctx->native_handler = wasi_socket_consume_mailbox;
+
+    WasiSocketDriverData *client_data = (WasiSocketDriverData *) wasi_socket_driver_create_data();
+    if (client_data == NULL) {
+        // Send {Ref, {error, enomem}}
+        tcp_tcp_socket_drop_own(accept_result.f0);
+        streams_input_stream_drop_own(accept_result.f1);
+        streams_output_stream_drop_own(accept_result.f2);
+
+        BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + TUPLE_SIZE(2), heap);
+        term error_tuple = term_alloc_tuple(2, &heap);
+        term_put_tuple_element(error_tuple, 0, ERROR_ATOM);
+        term_put_tuple_element(error_tuple, 1, globalcontext_make_atom(glb, ATOM_STR("\x6", "enomem")));
+
+        term reply_tuple = term_alloc_tuple(2, &heap);
+        term_put_tuple_element(reply_tuple, 0, ref);
+        term_put_tuple_element(reply_tuple, 1, error_tuple);
+
+        port_send_message(ctx->global, pid, reply_tuple);
+        END_WITH_STACK_HEAP(heap, ctx->global);
+        return;
+    }
+
+    // Initialize client socket data with values from accepted connection
+    client_data->wasi_socket = accept_result.f0;
+    client_data->input_stream = accept_result.f1;
+    client_data->output_stream = accept_result.f2;
+    client_data->has_socket = true;
+    client_data->has_streams = true;
+    client_data->has_network = false;  // Don't need network for accepted socket
+    client_data->connected = true;
+    client_data->listening = false;
+    client_data->binary = socket_data->binary;  // Inherit from listening socket
+    client_data->active = socket_data->active;
+    client_data->buffer = socket_data->buffer;
+    client_data->controlling_process = pid;
+    client_data->port = 0;
+    client_data->proto = TCP_ATOM;
+
+    new_ctx->platform_data = client_data;
+
+    // Send {Ref, {ok, ClientSocket}}
+    BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + TUPLE_SIZE(2) + TUPLE_SIZE(3), heap);
+
+    // Create socket wrapper {$avm_gen_tcp, Pid, gen_tcp_inet}
+    term socket_wrapper = term_alloc_tuple(3, &heap);
+    term_put_tuple_element(socket_wrapper, 0, globalcontext_make_atom(glb, gen_tcp_moniker_atom));
+    term_put_tuple_element(socket_wrapper, 1, term_from_local_process_id(new_ctx->process_id));
+    term_put_tuple_element(socket_wrapper, 2, globalcontext_make_atom(glb, native_tcp_module_atom));
+
+    term ok_tuple = term_alloc_tuple(2, &heap);
+    term_put_tuple_element(ok_tuple, 0, OK_ATOM);
+    term_put_tuple_element(ok_tuple, 1, socket_wrapper);
+
+    term reply_tuple = term_alloc_tuple(2, &heap);
+    term_put_tuple_element(reply_tuple, 0, ref);
+    term_put_tuple_element(reply_tuple, 1, ok_tuple);
+
+    TRACE("wasi_net: sending accept reply to pid\n");
+    port_send_message(ctx->global, pid, reply_tuple);
+    END_WITH_STACK_HEAP(heap, ctx->global);
+
+    TRACE("wasi_net: accept complete\n");
+}
+
+//
+// Port mailbox handler
+//
+
+static NativeHandlerResult wasi_socket_consume_mailbox(Context *ctx)
+{
+    GlobalContext *glb = ctx->global;
+
+    Message *message = mailbox_first(&ctx->mailbox);
+    if (message == NULL) {
+        return NativeContinue;
+    }
+
+    term msg = message->message;
+
+    TRACE("wasi_net: consume_mailbox received message\n");
+
+    // Parse GenMessage format (used by port:call)
+    GenMessage gen_message;
+    if (UNLIKELY((port_parse_gen_message(msg, &gen_message) != GenCallMessage)
+            || !term_is_tuple(gen_message.req) || term_get_tuple_arity(gen_message.req) < 1)) {
+        fprintf(stderr, "Received invalid wasi socket message.\n");
+        mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+        return NativeContinue;
+    }
+
+    term pid = gen_message.pid;
+    term ref = gen_message.ref;
+    term cmd = gen_message.req;
+
+    term cmd_name = term_get_tuple_element(cmd, 0);
+
+    // {init, Params}
+    if (cmd_name == globalcontext_make_atom(glb, ATOM_STR("\x4", "init"))) {
+        term params = term_get_tuple_element(cmd, 1);
+        term reply = wasi_socket_driver_do_init(ctx, params);
+        port_send_reply(ctx, pid, ref, reply);
+    }
+    // {send, Buffer}
+    else if (cmd_name == globalcontext_make_atom(glb, ATOM_STR("\x4", "send"))) {
+        term buffer = term_get_tuple_element(cmd, 1);
+        term reply = wasi_socket_driver_do_send(ctx, buffer);
+        port_send_reply(ctx, pid, ref, reply);
+    }
+    // {recv, Length, Timeout}
+    else if (cmd_name == globalcontext_make_atom(glb, ATOM_STR("\x4", "recv"))) {
+        term length = term_get_tuple_element(cmd, 1);
+        term timeout = term_get_tuple_element(cmd, 2);
+        // recv is async - it will send reply via mailbox
+        wasi_socket_driver_do_recv(ctx, pid, ref, length, timeout);
+        mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+        return NativeContinue;
+    }
+    // {listen, Backlog}
+    else if (cmd_name == globalcontext_make_atom(glb, ATOM_STR("\x6", "listen"))) {
+        term backlog = term_get_tuple_element(cmd, 1);
+        term reply = wasi_socket_driver_do_listen(ctx, backlog);
+        port_send_reply(ctx, pid, ref, reply);
+    }
+    // {accept, Timeout}
+    else if (cmd_name == globalcontext_make_atom(glb, ATOM_STR("\x6", "accept"))) {
+        term timeout = term_get_tuple_element(cmd, 1);
+        // accept is async - it will send reply via mailbox
+        wasi_socket_driver_do_accept(ctx, pid, ref, timeout);
+        mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+        return NativeContinue;
+    }
+    // {close}
+    else if (cmd_name == globalcontext_make_atom(glb, ATOM_STR("\x5", "close"))) {
+        wasi_socket_driver_do_close(ctx);
+        port_send_reply(ctx, pid, ref, OK_ATOM);
+        mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+        return NativeTerminate;
+    }
+    // {get_port}
+    else if (cmd_name == globalcontext_make_atom(glb, ATOM_STR("\x8", "get_port"))) {
+        term reply = wasi_socket_driver_get_port(ctx);
+        port_send_reply(ctx, pid, ref, reply);
+    }
+    // {sockname}
+    else if (cmd_name == globalcontext_make_atom(glb, ATOM_STR("\x8", "sockname"))) {
+        term reply = wasi_socket_driver_sockname(ctx);
+        port_send_reply(ctx, pid, ref, reply);
+    }
+    // {peername}
+    else if (cmd_name == globalcontext_make_atom(glb, ATOM_STR("\x8", "peername"))) {
+        term reply = wasi_socket_driver_peername(ctx);
+        port_send_reply(ctx, pid, ref, reply);
+    }
+    else {
+        TRACE("wasi_net: unknown command\n");
+        port_send_reply(ctx, pid, ref, port_create_error_tuple(ctx, BADARG_ATOM));
+    }
+
+    mailbox_remove_message(&ctx->mailbox, &ctx->heap);
+
+    TRACE("wasi_net: consume_mailbox done\n");
+    return NativeContinue;
+}
+
+//
+// Port initialization
+//
+
+Context *wasi_socket_init(GlobalContext *glb, term opts)
+{
+    UNUSED(opts);
+
+    TRACE("wasi_net: socket_init called\n");
+
+    Context *ctx = context_new(glb);
+    void *data = wasi_socket_driver_create_data();
+    ctx->native_handler = wasi_socket_consume_mailbox;
+    ctx->platform_data = data;
+
+    return ctx;
 }

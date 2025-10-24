@@ -98,4 +98,12 @@ term wasi_socket_driver_peername(Context *ctx);
  */
 void wasi_socket_driver_do_accept(Context *ctx, term pid, term ref, term timeout);
 
+/**
+ * @brief Initialize socket port
+ * @param glb Global context
+ * @param opts Initialization options
+ * @return New port context
+ */
+Context *wasi_socket_init(GlobalContext *glb, term opts);
+
 #endif // _WASI_NET_H_

@@ -40,7 +40,7 @@
 -module(gen_tcp).
 
 -export([
-    connect/3, send/2, recv/2, recv/3, close/1, listen/2, accept/1, accept/2, controlling_process/2
+    connect/3, connect/4, send/2, recv/2, recv/3, close/1, listen/2, accept/1, accept/2, controlling_process/2
 ]).
 
 -type reason() :: term().
@@ -101,6 +101,31 @@ connect(Address, Port, Options) ->
         Other ->
             Other
     end.
+
+%%-----------------------------------------------------------------------------
+%% @param   Address the address to which to connect
+%% @param   Port the port to which to connect
+%% @param   Options options for controlling the behavior of the socket
+%% @param   Timeout connection timeout in milliseconds or 'infinity'
+%% @returns {ok, Socket} | {error, Reason}
+%% @doc     Connect to a TCP endpoint with explicit timeout parameter.
+%%
+%%          This is a convenience wrapper that provides OTP API compatibility.
+%%          The timeout parameter overrides any {timeout, _} option in the
+%%          Options list.
+%% @end
+%%-----------------------------------------------------------------------------
+-spec connect(
+    Address :: inet:ip_address() | inet:hostname(),
+    Port :: inet:port_number(),
+    Options :: [connect_option()],
+    Timeout :: timeout()
+) ->
+    {ok, Socket :: inet:socket()} | {error, Reason :: reason()}.
+connect(Address, Port, Options, Timeout) ->
+    %% Remove any existing timeout option and add the new one
+    OptionsWithTimeout = [{timeout, Timeout} | proplists:delete(timeout, Options)],
+    connect(Address, Port, OptionsWithTimeout).
 
 %%-----------------------------------------------------------------------------
 %% @param   Socket The Socket obtained via connect/3
