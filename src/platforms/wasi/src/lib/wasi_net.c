@@ -942,18 +942,14 @@ void wasi_socket_driver_do_accept(Context *ctx, term pid, term ref, term timeout
 
     new_ctx->platform_data = client_data;
 
-    // Send {Ref, {ok, ClientSocket}}
-    BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + TUPLE_SIZE(2) + TUPLE_SIZE(3), heap);
+    // Send {Ref, {ok, ClientSocketPort}}
+    BEGIN_WITH_STACK_HEAP(TUPLE_SIZE(2) + TUPLE_SIZE(2), heap);
 
-    // Create socket wrapper {$avm_gen_tcp, Pid, gen_tcp_inet}
-    term socket_wrapper = term_alloc_tuple(3, &heap);
-    term_put_tuple_element(socket_wrapper, 0, globalcontext_make_atom(glb, gen_tcp_moniker_atom));
-    term_put_tuple_element(socket_wrapper, 1, term_port_from_local_process_id(new_ctx->process_id));
-    term_put_tuple_element(socket_wrapper, 2, globalcontext_make_atom(glb, native_tcp_module_atom));
+    term client_socket_port = term_port_from_local_process_id(new_ctx->process_id);
 
     term ok_tuple = term_alloc_tuple(2, &heap);
     term_put_tuple_element(ok_tuple, 0, OK_ATOM);
-    term_put_tuple_element(ok_tuple, 1, socket_wrapper);
+    term_put_tuple_element(ok_tuple, 1, client_socket_port);
 
     term reply_tuple = term_alloc_tuple(2, &heap);
     term_put_tuple_element(reply_tuple, 0, ref);
