@@ -28,6 +28,7 @@
 #include "platform_defaultatoms.h"
 #include "term.h"
 #include "wasi_file_nifs.h"
+#include "wasi_stdio_nifs.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -55,6 +56,12 @@ const struct Nif *platform_nifs_get_nif(const char *nifname)
 
     // Try file NIFs
     const struct Nif *nif = wasi_file_nifs_get_nif(nifname);
+    if (nif != NULL) {
+        return nif;
+    }
+
+    // Try stdio NIFs
+    nif = wasi_stdio_nifs_get_nif(nifname);
     if (nif != NULL) {
         return nif;
     }

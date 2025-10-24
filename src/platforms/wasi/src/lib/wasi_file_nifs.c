@@ -331,8 +331,8 @@ static term nif_file_read_file(Context *ctx, int argc, term argv[])
         glb
     );
 
-    // Free the read buffer
-    free(read_result.f0.ptr);
+    // Free the read buffer using WASI cleanup function
+    wasip2_list_u8_free(&read_result.f0);
 
     // Return {ok, Binary}
     term ok_tuple = term_alloc_tuple(2, &ctx->heap);

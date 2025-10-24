@@ -35,6 +35,8 @@ set(WASI_PLATFORM_SOURCES
     src/lib/wasi_net.c
     src/lib/wasi_file_nifs.h
     src/lib/wasi_file_nifs.c
+    src/lib/wasi_stdio_nifs.h
+    src/lib/wasi_stdio_nifs.c
 )
 
 # Find mbedtls
