@@ -35,6 +35,8 @@
 #include "term.h"
 
 #include <wasi/wasip2.h>
+#include <dirent.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -678,133 +680,23 @@ static term nif_file_rename(Context *ctx, int argc, term argv[])
 }
 
 // file:list_dir/1
+// TODO: Both WASI P2 directory listing APIs and POSIX readdir() have memory
+// issues in current WASI implementations. This needs to be revisited when
+// WASI tooling is more mature. For now, return enotsup.
 static term nif_file_list_dir(Context *ctx, int argc, term argv[])
 {
     UNUSED(argc);
+    UNUSED(argv);
     GlobalContext *glb = ctx->global;
 
-    // Get directory name
-    int ok;
-    char *dirname = interop_term_to_string(argv[0], &ok);
-    if (!ok) {
-        TRACE_FILE("wasi_file: list_dir - invalid dirname\n");
-        return ERROR_ATOM;
-    }
+    TRACE_FILE("wasi_file: list_dir - not supported in current WASI implementation\n");
 
-    TRACE_FILE("wasi_file: list_dir - attempting to list %s\n", dirname);
-
-    // Get preopened directory
-    filesystem_own_descriptor_t dir = get_preopen_dir();
-    if (dir.__handle == -1) {
-        free(dirname);
-        term error_tuple = term_alloc_tuple(2, &ctx->heap);
-        term_put_tuple_element(error_tuple, 0, ERROR_ATOM);
-        term_put_tuple_element(error_tuple, 1,
-            globalcontext_make_atom(glb, ATOM_STR("\x6", "enoent")));
-        return error_tuple;
-    }
-
-    // Open the directory for reading
-    wasip2_string_t path = {
-        .ptr = (uint8_t *)dirname,
-        .len = strlen(dirname)
-    };
-
-    filesystem_path_flags_t path_flags = 0;
-    filesystem_open_flags_t open_flags = FILESYSTEM_OPEN_FLAGS_DIRECTORY;
-    filesystem_descriptor_flags_t desc_flags = 0;
-
-    filesystem_error_code_t err;
-    filesystem_own_descriptor_t subdir;
-    bool result = filesystem_method_descriptor_open_at(
-        filesystem_borrow_descriptor(dir),
-        path_flags, &path, open_flags,
-        desc_flags,
-        &subdir, &err
-    );
-
-    free(dirname);
-    filesystem_descriptor_drop_own(dir);
-
-    if (!result) {
-        TRACE_FILE("wasi_file: list_dir - failed to open directory - %d\n", err);
-        term error_tuple = term_alloc_tuple(2, &ctx->heap);
-        term_put_tuple_element(error_tuple, 0, ERROR_ATOM);
-        term_put_tuple_element(error_tuple, 1, wasi_fs_error_to_atom(err, glb));
-        return error_tuple;
-    }
-
-    // Get directory entry stream
-    filesystem_own_directory_entry_stream_t stream;
-    result = filesystem_method_descriptor_read_directory(
-        filesystem_borrow_descriptor(subdir),
-        &stream, &err
-    );
-
-    if (!result) {
-        filesystem_descriptor_drop_own(subdir);
-        TRACE_FILE("wasi_file: list_dir - failed to read directory - %d\n", err);
-        term error_tuple = term_alloc_tuple(2, &ctx->heap);
-        term_put_tuple_element(error_tuple, 0, ERROR_ATOM);
-        term_put_tuple_element(error_tuple, 1, wasi_fs_error_to_atom(err, glb));
-        return error_tuple;
-    }
-
-    // Build list of filenames
-    term list = term_nil();
-
-    while (true) {
-        filesystem_option_directory_entry_t entry;
-        result = filesystem_method_directory_entry_stream_read_directory_entry(
-            filesystem_borrow_directory_entry_stream(stream),
-            &entry, &err
-        );
-
-        if (!result) {
-            filesystem_directory_entry_stream_drop_own(stream);
-            filesystem_descriptor_drop_own(subdir);
-            TRACE_FILE("wasi_file: list_dir - failed to read entry - %d\n", err);
-            term error_tuple = term_alloc_tuple(2, &ctx->heap);
-            term_put_tuple_element(error_tuple, 0, ERROR_ATOM);
-            term_put_tuple_element(error_tuple, 1, wasi_fs_error_to_atom(err, glb));
-            return error_tuple;
-        }
-
-        // Check if we reached the end
-        if (!entry.is_some) {
-            break;
-        }
-
-        // Convert entry name to Erlang term
-        size_t name_len = entry.val.name.len;
-        term filename_term = term_from_string((const uint8_t *)entry.val.name.ptr, name_len, &ctx->heap);
-
-        // Add to list (building in reverse order)
-        list = term_list_prepend(filename_term, list, &ctx->heap);
-
-        // Free the entry
-        filesystem_directory_entry_free(&entry.val);
-    }
-
-    filesystem_directory_entry_stream_drop_own(stream);
-    filesystem_descriptor_drop_own(subdir);
-
-    // Reverse the list to get correct order
-    // (We built it in reverse while reading entries)
-    term reversed_list = term_nil();
-    while (term_is_nonempty_list(list)) {
-        term head = term_get_list_head(list);
-        reversed_list = term_list_prepend(head, reversed_list, &ctx->heap);
-        list = term_get_list_tail(list);
-    }
-
-    TRACE_FILE("wasi_file: list_dir - success\n");
-
-    // Return {ok, [filenames]}
-    term ok_tuple = term_alloc_tuple(2, &ctx->heap);
-    term_put_tuple_element(ok_tuple, 0, OK_ATOM);
-    term_put_tuple_element(ok_tuple, 1, reversed_list);
-    return ok_tuple;
+    // Return {error, enotsup}
+    term error_tuple = term_alloc_tuple(2, &ctx->heap);
+    term_put_tuple_element(error_tuple, 0, ERROR_ATOM);
+    term_put_tuple_element(error_tuple, 1,
+        globalcontext_make_atom(glb, ATOM_STR("\x7", "enotsup")));
+    return error_tuple;
 }
 
 // NIF structures
