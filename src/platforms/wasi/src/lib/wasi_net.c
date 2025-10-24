@@ -948,7 +948,7 @@ void wasi_socket_driver_do_accept(Context *ctx, term pid, term ref, term timeout
     // Create socket wrapper {$avm_gen_tcp, Pid, gen_tcp_inet}
     term socket_wrapper = term_alloc_tuple(3, &heap);
     term_put_tuple_element(socket_wrapper, 0, globalcontext_make_atom(glb, gen_tcp_moniker_atom));
-    term_put_tuple_element(socket_wrapper, 1, term_from_local_process_id(new_ctx->process_id));
+    term_put_tuple_element(socket_wrapper, 1, term_port_from_local_process_id(new_ctx->process_id));
     term_put_tuple_element(socket_wrapper, 2, globalcontext_make_atom(glb, native_tcp_module_atom));
 
     term ok_tuple = term_alloc_tuple(2, &heap);
